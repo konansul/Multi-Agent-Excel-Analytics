@@ -26,7 +26,7 @@ def _read_excel_all_sheets(source: Union[str, Path, io.BytesIO], file_name: str)
     for idx, sheet_name in enumerate(xls.sheet_names):
         df = pd.read_excel(source, sheet_name = sheet_name)
 
-        dataset_id = f"{file_name}::{sheet_name}::{idx}"
+        dataset_id = f'{file_name}::{sheet_name}::{idx}'
 
         sheet_contexts.append(
             SheetContext(
@@ -46,8 +46,8 @@ def _read_csv(source: Union[str, Path, io.BytesIO], file_name: str) -> List[Shee
 
     df = pd.read_csv(source)
 
-    sheet_name = "CSV"
-    dataset_id = f"{file_name}::{sheet_name}::0"
+    sheet_name = 'CSV'
+    dataset_id = f'{file_name}::{sheet_name}::0'
 
     return [
         SheetContext(
@@ -59,3 +59,33 @@ def _read_csv(source: Union[str, Path, io.BytesIO], file_name: str) -> List[Shee
             dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()},
         )
     ]
+
+
+def load_from_path(path: Union[str, Path]) -> List[SheetContext]:
+
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError(f'File not found: {path}')
+
+    suffix = path.suffix.lower()
+
+    if suffix in ['.xlsx', '.xls']:
+        return _read_excel_all_sheets(path, file_name = path.name)
+    elif suffix == '.csv':
+        return _read_csv(path, file_name = path.name)
+    else:
+        raise ValueError(f'Unsupported file type: {suffix}. Supported: .xlsx, .xls, .csv')
+
+
+def load_from_upload(file_bytes: bytes, filename: str) -> List[SheetContext]:
+
+    suffix = Path(filename).suffix.lower()
+    buffer = io.BytesIO(file_bytes)
+
+    if suffix in ['.xlsx', '.xls']:
+        return _read_excel_all_sheets(buffer, file_name = filename)
+    elif suffix == '.csv':
+        return _read_csv(buffer, file_name = filename)
+    else:
+        raise ValueError(f'Unsupported file type: {suffix}. Supported: .xlsx, .xls, .csv')
