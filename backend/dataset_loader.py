@@ -40,3 +40,22 @@ def _read_excel_all_sheets(source: Union[str, Path, io.BytesIO], file_name: str)
         )
 
     return sheet_contexts
+
+
+def _read_csv(source: Union[str, Path, io.BytesIO], file_name: str) -> List[SheetContext]:
+
+    df = pd.read_csv(source)
+
+    sheet_name = "CSV"
+    dataset_id = f"{file_name}::{sheet_name}::0"
+
+    return [
+        SheetContext(
+            file_name = file_name,
+            sheet_name = sheet_name,
+            dataset_id = dataset_id,
+            df = df,
+            shape = df.shape,
+            dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()},
+        )
+    ]
