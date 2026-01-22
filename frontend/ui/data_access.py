@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import requests
+import streamlit as st
+from typing import Any, Dict, List, Optional
+
+API_BASE = "http://127.0.0.1:8000/v1"
+TIMEOUT = 120
+
+
+def _raise(resp: requests.Response):
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(f"API error {resp.status_code}: {detail}")
+
+def _auth_headers(token: Optional[str] = None) -> Dict[str, str]:
+    """
+    Если token не передан — берём из session_state.
+    """
+    tok = token or st.session_state.get("auth_token")
+    if not tok or not isinstance(tok, str):
+        return {}
+    return {"Authorization": f"Bearer {tok}"}
+
+def register_user(email: str, password: str) -> Dict[str, Any]:
+    payload = {"email": email, "password": password}
+    resp = requests.post(f"{API_BASE}/auth/register", json=payload, timeout=TIMEOUT)
+    _raise(resp)
+    return resp.json()  # {user_id, email}
+
+
+def login_user(email: str, password: str) -> Dict[str, Any]:
+    payload = {"email": email, "password": password}
+    resp = requests.post(f"{API_BASE}/auth/login", json=payload, timeout=TIMEOUT)
+    _raise(resp)
+    data = resp.json()  # {access_token, token_type}
+
+    token = data.get("access_token")
+    if not token:
+        raise RuntimeError("Login succeeded but no access_token returned")
+
+    st.session_state["auth_token"] = token
+    return data
+
+
+def auth_me() -> Dict[str, Any]:
+    resp = requests.get(f"{API_BASE}/auth/me", headers=_auth_headers(), timeout=TIMEOUT)
+    _raise(resp)
+    return resp.json()  # {user_id, email}
+
+
+def logout_user() -> None:
+    # JWT logout в MVP делается на клиенте: стереть токен.
+    st.session_state.pop("auth_token", None)
+    # очистим кеши, чтобы не вытягивать данные другого пользователя
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+
+# -------------------------
+# Datasets
+# -------------------------
+@st.cache_data(show_spinner=False)
+def cached_upload(file_bytes: bytes, filename: str, token_cache_key: str) -> List[Dict[str, Any]]:
+    """
+    token_cache_key нужен только для того, чтобы кеш Streamlit был разный для разных юзеров.
+    Внутри функции он не используется напрямую (но влияет на ключ кеша).
+    """
+    files = {"file": (filename, file_bytes)}
+
+    resp = requests.post(
+        f"{API_BASE}/datasets",
+        files=files,
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()["datasets"]
+
+
+def get_preview(dataset_id: str, rows: int = 50) -> Dict[str, Any]:
+    resp = requests.get(
+        f"{API_BASE}/datasets/{dataset_id}/preview",
+        params={"rows": rows},
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
+
+
+def get_meta(dataset_id: str) -> Dict[str, Any]:
+    resp = requests.get(
+        f"{API_BASE}/datasets/{dataset_id}",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
+
+
+def download_dataset(dataset_id: str, version: str = "current", fmt: str = "xlsx") -> bytes:
+    resp = requests.get(
+        f"{API_BASE}/datasets/{dataset_id}/download",
+        params={"version": version, "fmt": fmt},
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.content
+
+def run_profiling(dataset_id: str, options: Optional[Dict[str, Any]] = None) -> str:
+    resp = requests.post(
+        f"{API_BASE}/profiling",
+        json={"dataset_id": dataset_id, "options": options},
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()["profile_id"]
+
+
+def get_profile(profile_id: str) -> Dict[str, Any]:
+    resp = requests.get(
+        f"{API_BASE}/profiling/{profile_id}",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
+
+def suggest_policy(dataset_id: str, mode: str = "rule_based", llm_model: str = "gemini-2.5-flash") -> Dict[str, Any]:
+    resp = requests.post(
+        f"{API_BASE}/policy/suggest",
+        json={"dataset_id": dataset_id, "mode": mode, "llm_model": llm_model},
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()  # {policy, source, notes}
+
+def run_cleaning(
+    dataset_id: str,
+    use_llm: bool = False,
+    llm_model: str = "gemini-2.5-flash",
+    overrides: Optional[Dict[str, Any]] = None,
+) -> str:
+    payload: Dict[str, Any] = {"dataset_id": dataset_id, "use_llm": use_llm, "llm_model": llm_model}
+    if overrides:
+        payload.update(overrides)
+
+    resp = requests.post(
+        f"{API_BASE}/cleaning/runs",
+        json=payload,
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()["run_id"]
+
+
+def get_run_status(run_id: str) -> Dict[str, Any]:
+    resp = requests.get(
+        f"{API_BASE}/cleaning/runs/{run_id}",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
+
+
+def get_run_report(run_id: str) -> Dict[str, Any]:
+    resp = requests.get(
+        f"{API_BASE}/cleaning/runs/{run_id}/report",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
+
+def download_artifact(run_id: str, name: str) -> bytes:
+    resp = requests.get(
+        f"{API_BASE}/cleaning/runs/{run_id}/artifacts/{name}",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.content
+
+def list_my_runs(token: str) -> Dict[str, Any]:
+    resp = requests.get(f"{API_BASE}/cleaning/runs", headers=_auth_headers(token), timeout=TIMEOUT)
+    _raise(resp)
+    return resp.json()  # {"runs": [...]}
+
+def delete_run(run_id: str) -> Dict[str, Any]:
+    resp = requests.delete(
+        f"{API_BASE}/cleaning/runs/{run_id}",
+        headers=_auth_headers(),
+        timeout=TIMEOUT,
+    )
+    _raise(resp)
+    return resp.json()
