@@ -12,18 +12,18 @@ All Python dependencies are listed in requirements.txt.
 
 
 ## Setup
-1. Clone the repository
+### 1. Clone the repository
 
 git clone https://github.com/konansul/Multi-Agent-Excel-Analytics
 cd Multi-Agent-Excel-Analytics
 
-2. Start PostgreSQL through Docker. PostgreSQL is started via Docker Compose, this will start at port 5433.
+### 2. Start PostgreSQL through Docker. PostgreSQL is started via Docker Compose, this will start at port 5433.
 
 ```bash
 docker compose up -d
 ```
 
-3. Create and configure environment variables
+### 3. Create and configure environment variables
 This project uses environment variables for database connection, authentication, storage, and LLM access. Create a .env file in the project root directory (the same level as README.md):
 
 ```bash
@@ -43,20 +43,20 @@ JWT_ALGORITHM=HS256
 REFRESH_TOKEN_EXPIRE_DAYS=7
 ```
 
-4. Create virtual environment and install requirements.
+### 4. Create virtual environment and install requirements.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
-5. Start the backend API server using `uvicorn`, the backend will be available at: http://127.0.0.1:8000, swagger documentation: http://127.0.0.1:8000/docs
+### 5. Start the backend API server using `uvicorn`, the backend will be available at: http://127.0.0.1:8000, swagger documentation: http://127.0.0.1:8000/docs
 
 ```bash
  uvicorn backend.api.main:app --reload --reload-dir backend --port 8000
 ```
 
-6. In a separate terminal, start the Streamlit frontend, which will be available at http://localhost:8501
+### 6. In a separate terminal, start the Streamlit frontend, which will be available at http://localhost:8501
 
 ```bash
 streamlit run frontend/main_streamlit.py
