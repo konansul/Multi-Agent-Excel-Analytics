@@ -205,3 +205,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# Local storage (runtime artifacts)
+storage/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Streamlit
+.streamlit/
+
+# Logs
+*.log
+logs/
+
+# Generated test outputs
+backend/test_scripts/_outputs/
