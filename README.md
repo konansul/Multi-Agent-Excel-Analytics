@@ -13,9 +13,10 @@ All Python dependencies are listed in requirements.txt.
 
 ## Setup
 ### 1. Clone the repository
-
+```bash
 git clone https://github.com/konansul/Multi-Agent-Excel-Analytics
 cd Multi-Agent-Excel-Analytics
+```
 
 ### 2. Start PostgreSQL through Docker.
 PostgreSQL is started via Docker Compose, this will start at port 5433.
