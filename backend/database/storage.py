@@ -1,8 +1,14 @@
+# backend/database/storage.py
 from __future__ import annotations
 
 import os
+import numpy as np
+import pandas as pd
+
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+from datetime import date, datetime
+
 
 BLOB_DIR = Path(os.getenv("LOCAL_BLOB_DIR", "storage")).resolve()
 
@@ -56,3 +62,37 @@ def delete_key(key: str) -> None:
     path = _full_path(key)
     if path.exists():
         path.unlink()
+
+def to_jsonable(x: Any) -> Any:
+    # Recursively convert objects to JSON-serializable python types
+    if x is None:
+        return None
+
+    if isinstance(x, (np.integer, np.floating, np.bool_)):
+        return x.item()
+
+    try:
+        if pd.isna(x):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(x, (pd.Timestamp, datetime, date)):
+        return x.isoformat()
+
+    if isinstance(x, dict):
+        return {str(k): to_jsonable(v) for k, v in x.items()}
+
+    if isinstance(x, (list, tuple, set)):
+        return [to_jsonable(v) for v in x]
+
+    if isinstance(x, pd.Series):
+        return [to_jsonable(v) for v in x.tolist()]
+    if isinstance(x, pd.Index):
+        return [to_jsonable(v) for v in x.tolist()]
+    if isinstance(x, pd.DataFrame):
+        return to_jsonable(x.to_dict(orient="records"))
+    if isinstance(x, np.ndarray):
+        return [to_jsonable(v) for v in x.tolist()]
+
+    return x
