@@ -1,93 +1,200 @@
+# frontend/ui/_03_tab_signals.py
 from __future__ import annotations
 
+from typing import Any, Dict, Optional
+
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 
+def _to_jsonish(v: Any) -> Any:
+    if v is None:
+        return None
+
+    if isinstance(v, (np.integer, np.floating, np.bool_)):
+        return v.item()
+
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(v, (dict, list, tuple, set)):
+        try:
+            return str(v)
+        except Exception:
+            return "<unserializable>"
+
+    return v
+
+
 def _kv_table(d: dict, key_name: str, value_name: str) -> pd.DataFrame:
     d = d or {}
-    return pd.DataFrame([{key_name: k, value_name: v} for k, v in d.items()])
+    rows = []
+    for k, v in d.items():
+        rows.append({key_name: str(k), value_name: _to_jsonish(v)})
+    return pd.DataFrame(rows)
 
 
-def _render_profile_block(title: str, profile: dict):
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (np.integer,)):
+            return int(x.item())
+        return int(float(x))  # handles "52.0"
+    except Exception:
+        return default
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (np.floating, np.integer)):
+            return float(x.item())
+        return float(x)
+    except Exception:
+        return default
+
+
+def _normalize_counts(profile: Dict[str, Any]) -> Dict[str, int]:
+    counts = profile.get("counts") or profile.get("column_groups")
+    if isinstance(counts, dict) and counts:
+        out: Dict[str, int] = {}
+        for k, v in counts.items():
+            out[str(k)] = _safe_int(v, 0)
+        return out
+
+    cols = profile.get("columns") or {}
+    if isinstance(cols, dict) and cols:
+        out2: Dict[str, int] = {}
+        for k, v in cols.items():
+            out2[str(k)] = len(v) if isinstance(v, list) else 0
+        return out2
+
+    return {}
+
+
+def _get_top_missing(profile: Dict[str, Any]) -> Dict[str, float]:
+    miss = profile.get("missingness") or {}
+    top = miss.get("top_missing_columns") or profile.get("top_missing_columns") or {}
+    if not isinstance(top, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for k, v in top.items():
+        out[str(k)] = _safe_float(v, 0.0)
+    return out
+
+
+def _get_corr_pairs(profile: Dict[str, Any]) -> list:
+    corr = profile.get("correlation") or {}
+    pairs = corr.get("top_abs_pairs") or []
+    return pairs if isinstance(pairs, list) else []
+
+
+def _get_skew_top(profile: Dict[str, Any]) -> Dict[str, float]:
+    skew = profile.get("skewness") or {}
+    top = skew.get("top_abs_skewed") or profile.get("skewness_top_abs") or {}
+    if not isinstance(top, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for k, v in top.items():
+        out[str(k)] = _safe_float(v, 0.0)
+    return out
+
+
+def _profile_overall_missing(profile: Dict[str, Any]) -> float:
+    miss = profile.get("missingness") or {}
+    return _safe_float(miss.get("overall_missing_%"), 0.0)
+
+
+def _render_profile_block(title: str, profile: Optional[Dict[str, Any]]):
     profile = profile or {}
 
     st.subheader(title)
 
-    c1, c2, c3 = st.columns(3)
+    dataset_type = str(profile.get("dataset_type"))
+    n_rows = _safe_int(profile.get("n_rows"))
+    n_cols = _safe_int(profile.get("n_cols"))
+    overall_missing = _profile_overall_missing(profile)
+
+    has_time_index = bool(profile.get("has_time_index"))
+    time_column = profile.get("time_column")
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Dataset type", str(profile.get("dataset_type")))
+        st.metric("Dataset type", dataset_type)
     with c2:
-        st.metric("Has time index", bool(profile.get("has_time_index")))
+        st.metric("Rows", n_rows)
     with c3:
-        st.metric("Time column", str(profile.get("time_column")))
+        st.metric("Cols", n_cols)
+    with c4:
+        st.metric("Overall missing %", overall_missing)
+
+    c5, c6 = st.columns(2)
+    with c5:
+        st.metric("Has time index", has_time_index)
+    with c6:
+        st.metric("Time column", "None" if time_column is None else str(time_column))
 
     st.write("**Column groups (counts)**")
-    counts = profile.get("counts") or profile.get("column_groups") or {}
-    st.dataframe(_kv_table(counts, "group", "count"), width="stretch", hide_index=True)
+    counts = _normalize_counts(profile)
+    if counts:
+        st.dataframe(_kv_table(counts, "group", "count"), width="stretch", hide_index=True)
+    else:
+        st.info("No column group info found in profile.")
 
     st.write("**Top missing columns (%)**")
-    miss = (profile.get("missingness") or {}).get("top_missing_columns") or profile.get("top_missing_columns") or {}
-    miss_df = _kv_table(miss, "column", "missing_%").sort_values("missing_%", ascending=False)
-    st.dataframe(miss_df, width="stretch", hide_index=True)
+    miss = _get_top_missing(profile)
+    if miss:
+        miss_df = _kv_table(miss, "column", "missing_%")
+        if "missing_%" in miss_df.columns:
+            miss_df["missing_%"] = pd.to_numeric(miss_df["missing_%"], errors="coerce")
+        miss_df = miss_df.sort_values("missing_%", ascending=False, na_position="last")
+        st.dataframe(miss_df, width="stretch", hide_index=True)
+    else:
+        st.info("No missingness info found in profile.")
 
     st.write("**Top correlations (abs)**")
-    corr = (profile.get("correlation") or {}).get("top_abs_pairs") or []
+    corr = _get_corr_pairs(profile)
     if corr:
-        st.dataframe(pd.DataFrame(corr), width="stretch", hide_index=True)
+        corr_df = pd.DataFrame([{k: _to_jsonish(v) for k, v in row.items()} for row in corr])
+        st.dataframe(corr_df, width="stretch", hide_index=True)
     else:
         st.info("No correlation pairs (need >= 2 numeric columns).")
 
     st.write("**Skewness (top abs)**")
-    skew = (profile.get("skewness") or {}).get("top_abs_skewed") or profile.get("skewness_top_abs") or {}
+    skew = _get_skew_top(profile)
     if skew:
-        skew_df = _kv_table(skew, "column", "skew").assign(abs_skew=lambda x: x["skew"].abs())
-        skew_df = skew_df.sort_values("abs_skew", ascending=False).drop(columns=["abs_skew"])
+        skew_df = _kv_table(skew, "column", "skew")
+        if "skew" in skew_df.columns:
+            skew_df["skew"] = pd.to_numeric(skew_df["skew"], errors="coerce")
+            skew_df["abs_skew"] = skew_df["skew"].abs()
+            skew_df = skew_df.sort_values("abs_skew", ascending=False, na_position="last").drop(columns=["abs_skew"])
         st.dataframe(skew_df, width="stretch", hide_index=True)
     else:
         st.info("No skewness computed (need enough numeric data).")
 
     warnings = profile.get("warnings") or []
-    if warnings:
-        st.warning("\n".join(warnings))
+    if isinstance(warnings, list) and warnings:
+        st.warning("\n".join([str(x) for x in warnings]))
 
 
 def render_tab_signals(cleaning_report: dict):
-    """
-    Expects cleaning_report from run_cleaning_pipeline(), i.e. the same report
-    you returned from cached_clean(). It should contain:
-      - report["pre_profile"]
-      - report["post_profile"]
-    """
     pre = (cleaning_report or {}).get("pre_profile")
     post = (cleaning_report or {}).get("post_profile")
 
-    st.header("📡 Signal Generation")
-
-    if not pre and not post:
+    if not isinstance(pre, dict) and not isinstance(post, dict):
         st.error("No profiling data found in report. Make sure pipeline saves pre_profile/post_profile.")
         return
 
     tab_pre, tab_post = st.tabs(["Before cleaning", "After cleaning"])
 
     with tab_pre:
-        _render_profile_block("Signals — BEFORE cleaning", pre)
+        _render_profile_block("Before cleaning", pre if isinstance(pre, dict) else {})
 
     with tab_post:
-        _render_profile_block("Signals — AFTER cleaning", post)
-
-    # Optional: quick diff (nice to have)
-    if pre and post:
-        st.divider()
-        st.subheader("🔁 Quick comparison")
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Rows", int(pre.get("n_rows", 0)), delta=int(post.get("n_rows", 0)) - int(pre.get("n_rows", 0)))
-        with c2:
-            st.metric("Cols", int(pre.get("n_cols", 0)), delta=int(post.get("n_cols", 0)) - int(pre.get("n_cols", 0)))
-        with c3:
-            pre_m = (pre.get("missingness") or {}).get("overall_missing_%")
-            post_m = (post.get("missingness") or {}).get("overall_missing_%")
-            if pre_m is not None and post_m is not None:
-                st.metric("Overall missing %", float(pre_m), delta=float(post_m) - float(pre_m))
+        _render_profile_block("After cleaning", post if isinstance(post, dict) else {})
