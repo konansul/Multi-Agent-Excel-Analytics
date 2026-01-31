@@ -1,3 +1,4 @@
+# backend/api/auth.py
 from __future__ import annotations
 
 from typing import Optional
@@ -77,7 +78,6 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # ✅ subject = user_id
     token = create_access_token(subject=user.user_id)
     return {"access_token": token, "token_type": "bearer"}
 
@@ -89,5 +89,4 @@ def me(current: User = Depends(get_current_user)):
 
 @router.post("/auth/logout")
 def logout():
-    # JWT logout в MVP делается на клиенте (стереть токен).
     return {"ok": True}

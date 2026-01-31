@@ -1,3 +1,4 @@
+# backend/api/models.py
 from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
@@ -11,7 +12,6 @@ class DatasetRef(BaseModel):
 
 class UploadResponse(BaseModel):
     datasets: list[Dict[str, Any]]  # each sheet context meta
-    # пример элемента:
     # {
     #   "dataset_id": "...",
     #   "file_name": "...",
@@ -53,7 +53,6 @@ class CleaningRunRequest(BaseModel):
     use_llm: bool = False
     llm_model: str = "gemini-2.5-flash"
 
-    # overrides (optional): если хочешь дать UI ручные knobs
     missing_threshold: Optional[float] = None
     impute: Optional[bool] = None
     numeric_strategy: Optional[str] = None

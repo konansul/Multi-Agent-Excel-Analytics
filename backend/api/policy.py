@@ -1,3 +1,4 @@
+# backend/api/policy.py
 from __future__ import annotations
 
 import io
@@ -20,12 +21,10 @@ router = APIRouter()
 
 @router.post("/policy/suggest", response_model=PolicySuggestResponse)
 def suggest_policy(req: PolicySuggestRequest, db: Session = Depends(get_db)):
-    # 1) meta из Postgres
     row: Dataset | None = db.get(Dataset, req.dataset_id)
     if not row:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    # 2) parquet из локального blob_store
     try:
         parquet_bytes = get_bytes(row.current_parquet_key)
         df = pd.read_parquet(io.BytesIO(parquet_bytes))
@@ -34,7 +33,6 @@ def suggest_policy(req: PolicySuggestRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read parquet: {e}")
 
-    # 3) profiling + policy agent
     pre_profile = profile_dataframe(df)
     use_llm = (req.mode == "llm")
 

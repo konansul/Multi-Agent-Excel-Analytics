@@ -1,3 +1,4 @@
+# backend/api/main.py
 from pathlib import Path
 from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,9 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ creates tables if missing
 Base.metadata.create_all(bind=engine)
-
 app.include_router(auth.router, prefix="/v1", tags=["auth"])
 app.include_router(datasets.router, prefix="/v1", tags=["datasets"])
 app.include_router(profiling.router, prefix="/v1", tags=["profiling"])
