@@ -9,8 +9,14 @@ from ui._04_tab_visualization import render_tab_visualization
 from ui._05_save_all_files import render_tab_saved_datasets
 
 st.set_page_config(page_title="4CAST", layout="wide")
-st.title("4CAST: Multi-Agent Excel Pipeline")
-st.caption("Ingestion → Cleaning → Signals → Visualization")
+st.title("4CAST — Data Cleaning and Analysis")
+st.caption(
+    "4CAST is an end-to-end system for transforming raw Excel and CSV files into clean, analysis-ready datasets. "
+    "The platform automatically ingests multi-sheet spreadsheets, profiles data quality, and identifies structural, statistical, and semantic issues. "
+    "It applies intelligent cleaning pipelines that combine deterministic rules with optional large language model cleaning_agent for context-aware decisions. "
+    "Throughout the process, 4CAST generates detailed signals and metadata describing missingness, outliers, distributions, and correlations. "
+    "The system preserves full reproducibility by storing cleaning runs, reports, and artifacts for every dataset and sheet. "
+)
 
 if "auth_token" not in st.session_state:
     st.session_state.auth_token = None
@@ -34,8 +40,8 @@ def get_active_dataset():
 
 
 tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "0) Auth",
-    "1) Ingestion & Sheets",
+    "0) Authentication",
+    "1) Upload Files",
     "2) Data Cleaning",
     "3) Signal Generation",
     "4) Visualization",
@@ -47,7 +53,7 @@ with tab0:
 
 with tab1:
     if not is_authed():
-        st.info("Please login in tab 0) Auth to use the app.")
+        st.info("Please login first.")
     else:
         render_tab_ingestion()
 
@@ -57,7 +63,7 @@ with tab2:
     if not is_authed():
         st.info("Please login first.")
     elif not dataset_id:
-        st.info("Go to tab 1) Ingestion & Sheets and select a dataset first.")
+        st.info("Please upload the dataset first.")
     else:
         run_id, report = render_tab_cleaning(selected_file, sheet_meta, dataset_id=dataset_id)
         if run_id and report:
@@ -67,17 +73,16 @@ with tab2:
                 "run_id": run_id,
                 "report": report,
             }
-            st.success("Dataset cleaned and saved")
 
 with tab3:
     if not is_authed():
         st.info("Please login first.")
     elif not dataset_id:
-        st.info("Select a dataset in tab 1 first.")
+        st.info("Please upload the dataset first.")
     else:
         item = st.session_state.runs_store.get(dataset_id)
         if not item:
-            st.info("Clean the dataset first (tab 2).")
+            st.info("Please clean the dataset first in third tab.")
         else:
             render_tab_signals(item["report"])
 
@@ -85,11 +90,11 @@ with tab4:
     if not is_authed():
         st.info("Please login first.")
     elif not dataset_id:
-        st.info("Select a dataset in tab 1 first.")
+        st.info("Please upload the dataset first.")
     else:
         item = st.session_state.runs_store.get(dataset_id)
         if not item:
-            st.info("Clean the dataset first (tab 2).")
+            st.info("Please clean the dataset first in third tab.")
         else:
             render_tab_visualization()
 
