@@ -14,10 +14,9 @@ from backend.database.models import Dataset
 from backend.database.storage import get_bytes
 
 from backend.app.profiling.profiling import profile_dataframe
-from backend.app.agents.cleaning_policy_agent import build_cleaning_plan
+from backend.app.cleaning_agent.cleaning_policy_agent import build_cleaning_plan
 
 router = APIRouter()
-
 
 @router.post("/policy/suggest", response_model=PolicySuggestResponse)
 def suggest_policy(req: PolicySuggestRequest, db: Session = Depends(get_db)):

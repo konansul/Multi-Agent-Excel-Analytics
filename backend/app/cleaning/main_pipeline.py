@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional, Tuple, Union
 import pandas as pd
 
 from ..profiling.profiling import profile_dataframe
-from ..agents.cleaning_policy_agent import build_cleaning_plan
-from ..agents.schemas import CleaningPlan
+from ..cleaning_agent.cleaning_policy_agent import build_cleaning_plan
+from ..cleaning_agent.schemas import CleaningPlan
 
 from ._01_normalize import normalize_columns
 from ._02_trim_strings import trim_strings
