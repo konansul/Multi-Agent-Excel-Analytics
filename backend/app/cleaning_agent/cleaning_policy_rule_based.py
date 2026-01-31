@@ -1,3 +1,4 @@
+# backend/app/cleaning_agent/cleaning_policy_rule_based.py
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -10,14 +11,18 @@ from .cleaning_policy_utils import (
     _estimate_overall_missing_pct,
 )
 
-
 def build_cleaning_plan_rule_based(pre_profile: Dict[str, Any]) -> CleaningPlan:
     rows = _get_int(pre_profile, ["rows", "n_rows", "rows_before"], default=0)
     cols = _get_int(pre_profile, ["cols", "n_cols", "cols_before"], default=0)
 
     missing_overall = _get_float(
         pre_profile,
-        keys=["missing_overall", "overall_missing_pct", "overall_missing_%", "overall_missing_percent"],
+        keys=[
+            "missing_overall",
+            "overall_missing_pct",
+            "overall_missing_%",
+            "overall_missing_percent",
+        ],
         default=None,
     )
 
@@ -51,7 +56,13 @@ def build_cleaning_plan_rule_based(pre_profile: Dict[str, Any]) -> CleaningPlan:
     params = dict(default_plan.params)
     notes: List[str] = []
 
-    # datetime inference
+    enabled_steps["normalize"] = True
+    enabled_steps["trim_strings"] = True
+    enabled_steps["standardize_missing"] = True
+    enabled_steps["cast_types"] = True
+    enabled_steps["encode_booleans"] = True
+    enabled_steps["drop_rules"] = True
+
     if (not has_time_index) and (n_datetime == 0):
         enabled_steps["datetime_inference"] = False
         notes.append("No time index / datetime columns detected → disable datetime inference.")
@@ -60,8 +71,18 @@ def build_cleaning_plan_rule_based(pre_profile: Dict[str, Any]) -> CleaningPlan:
         if time_column:
             notes.append(f"Time column detected: '{time_column}'.")
 
-    # imputation (simple rule; you can upgrade later to max-missing-column logic)
-    IMPUTE_MIN_MISSING_PCT = 5.0
+    enabled_steps["deduplicate"] = True
+    if rows <= 5:
+        notes.append("Very few rows → deduplicate enabled but impact likely minimal.")
+
+    if n_numeric >= 1 and rows >= 30:
+        enabled_steps["outliers"] = True
+        notes.append("Numeric columns + enough rows → enable outliers handling.")
+    else:
+        enabled_steps["outliers"] = False
+        notes.append("Not enough numeric signal/rows → disable outliers handling.")
+
+    IMPUTE_MIN_MISSING_PCT = 0.0
     if float(missing_overall) < IMPUTE_MIN_MISSING_PCT:
         enabled_steps["impute_missing"] = False
         notes.append(
@@ -73,36 +94,47 @@ def build_cleaning_plan_rule_based(pre_profile: Dict[str, Any]) -> CleaningPlan:
             f"Overall missingness is {missing_overall:.2f}% ≥ {IMPUTE_MIN_MISSING_PCT:.1f}% → enable imputation."
         )
 
-    # differences
-    if n_numeric < 2:
-        enabled_steps["differences"] = False
-        notes.append("Fewer than 2 numeric columns → disable differences step.")
-    else:
-        enabled_steps["differences"] = True
-
     if rows < 10:
         notes.append("Too few rows (<10). Cleaning works, but statistics may be unreliable.")
 
-    # params
     params["missing_threshold"] = 0.4 if cols >= 40 else 0.5
     if cols >= 40:
         notes.append("Many columns detected → using missing_threshold=0.4.")
+
+    params["row_missing_threshold"] = 0.80
+    params["drop_rows"] = True if cols >= 5 else False
+    params["ignore_columns_for_row_drop"] = []
+
+    if cols < 5:
+        notes.append("Too few columns → disable dropping rows by missingness (drop_rows=false).")
 
     params["datetime_success_ratio"] = 0.7 if has_time_index else 0.8
 
     skew_top = pre_profile.get("skewness_top_abs") or pre_profile.get("skewness_top")
     if skew_top:
         params["numeric_strategy"] = "median"
-        notes.append("Skewness detected → using numeric_strategy='median'.")
+        notes.append("Skewness detected → numeric_strategy='median'.")
     else:
         params["numeric_strategy"] = "mean"
 
     params["categorical_strategy"] = "mode"
-    params["impute"] = bool(enabled_steps["impute_missing"])
+    params["datetime_strategy"] = None
+    params["fill_value"] = 0
 
+    params["categorical_numeric_max_unique"] = 30 if n_categorical > 20 else 20
     if n_categorical > 20:
-        params["categorical_numeric_max_unique"] = 30
         notes.append("Many categorical columns → categorical_numeric_max_unique=30.")
+
+    if enabled_steps["outliers"]:
+        params["outliers_method"] = "iqr"
+        params["outliers_action"] = "clip"
+        params["iqr_k"] = 1.5
+        params["zscore_threshold"] = 3.0
+    else:
+        params["outliers_method"] = "none"
+        params["outliers_action"] = "none"
+        params["iqr_k"] = 1.5
+        params["zscore_threshold"] = 3.0
 
     if n_boolean > 0:
         notes.append(f"Boolean columns detected: {n_boolean}.")
@@ -112,5 +144,5 @@ def build_cleaning_plan_rule_based(pre_profile: Dict[str, Any]) -> CleaningPlan:
         params=params,
         notes=notes,
         source="rule_based",
-        version=1,
+        version=2,
     )
