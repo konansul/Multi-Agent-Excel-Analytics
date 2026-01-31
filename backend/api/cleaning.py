@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import json
+import traceback
 from datetime import datetime
 from typing import Any, Dict, Optional, List
 
@@ -16,7 +18,7 @@ from backend.api.storage import new_id
 
 from backend.app.cleaning.main_pipeline import run_cleaning_pipeline
 
-from backend.database.storage import get_bytes, put_bytes, delete_key
+from backend.database.storage import get_bytes, put_bytes, delete_key, to_jsonable
 from backend.database.db import get_db
 from backend.database.models import Dataset, CleaningRun, User
 
@@ -79,17 +81,15 @@ def run_cleaning(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # 1) dataset должен принадлежать пользователю
+
     ds = _owned_dataset_or_404(db, req.dataset_id, current_user.user_id)
 
-    # 2) читаем current.parquet (как у тебя)
     try:
         parquet_bytes = get_bytes(ds.current_parquet_key)
         df = pd.read_parquet(io.BytesIO(parquet_bytes))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load dataset parquet: {e}")
 
-    # 3) kwargs
     kwargs: Dict[str, Any] = {
         "use_llm": bool(req.use_llm),
         "llm_model": req.llm_model,
@@ -111,7 +111,6 @@ def run_cleaning(
     if req.categorical_numeric_max_unique is not None:
         kwargs["categorical_numeric_max_unique"] = int(req.categorical_numeric_max_unique)
 
-    # 4) создаём run в БД (ВАЖНО)
     run_id = new_id("run")
     run_row = CleaningRun(
         run_id=run_id,
@@ -125,7 +124,6 @@ def run_cleaning(
     db.add(run_row)
     db.commit()
 
-    # 5) запускаем pipeline
     try:
         clean_df, report = run_cleaning_pipeline(df, **kwargs)
     except Exception as e:
@@ -133,30 +131,34 @@ def run_cleaning(
         run_row.error = str(e)
         run_row.updated_at = datetime.utcnow()
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Cleaning pipeline failed: {e}")
 
-    # 6) persist artifacts в local blob store (в ПАПКУ ПОЛЬЗОВАТЕЛЯ)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": f"Cleaning pipeline failed: {e}",
+                "type": type(e).__name__,
+                "traceback": traceback.format_exc(),
+            },
+        )
+
     prefix = _run_prefix(current_user.user_id, run_id)
     report_key = f"{prefix}/report.json"
     cleaned_parquet_key = f"{prefix}/cleaned.parquet"
     cleaned_xlsx_key = f"{prefix}/cleaned.xlsx"
 
     try:
-        # parquet
         buf = io.BytesIO()
         clean_df.to_parquet(buf, index=False)
         put_bytes(cleaned_parquet_key, buf.getvalue())
 
-        # xlsx
         out = io.BytesIO()
         with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
             clean_df.to_excel(writer, index=False, sheet_name="data")
         out.seek(0)
         put_bytes(cleaned_xlsx_key, out.getvalue())
 
-        # report json bytes
-        import json
-        put_bytes(report_key, json.dumps(report, ensure_ascii=False).encode("utf-8"))
+        safe_report = to_jsonable(report)
+        put_bytes(report_key, json.dumps(safe_report, ensure_ascii=False, indent=2).encode("utf-8"))
 
     except Exception as e:
         run_row.status = "failed"
@@ -288,17 +290,14 @@ def delete_run(
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    # удалить артефакты (если есть)
     keys = [row.report_key, row.cleaned_parquet_key, row.cleaned_xlsx_key]
     for k in keys:
         if k:
             try:
                 delete_key(k)
             except Exception:
-                # не валим запрос, если файл уже удалён
                 pass
 
-    # удалить запись из БД
     db.delete(row)
     db.commit()
 
