@@ -65,82 +65,99 @@ In a separate terminal, start the Streamlit frontend, which will be available at
 ```bash
 streamlit run frontend/main_streamlit.py
 ```
+## Database Schema
+The backend uses a PostgreSQL database to persist users, datasets, profiling results, and cleaning executions in a fully reproducible way. Each registered user has isolated ownership over their uploaded datasets, generated profiles, and cleaning runs. Uploaded Excel and CSV files are represented as datasets, where each Excel sheet is stored and processed independently. Profiling results are stored separately and capture structural and statistical signals used to guide cleaning decisions. Every execution of the cleaning pipeline is recorded as a cleaning run, including its status, generated artifacts, and reports. Multiple cleaning runs can exist for the same dataset, allowing history tracking and safe re-execution with different policies. The schema is designed to preserve the full lineage from raw data to cleaned outputs, even across user logins. Database records reference large artifacts stored on disk, combining transactional metadata with efficient file storage. The overall schema is depicted in the figure below:
 
+<img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/d6cdcee7-6583-4ba1-a092-e54c64b3918f" />
 
 ## Project structure
 
 ```bash
 Multi-Agent-Excel-Analytics/
 │
-├── backend/                        # FastAPI backend
-│   ├── api/                        # API routers (auth, datasets, profiling, policy, cleaning)
-│   │   ├── auth.py
-│   │   ├── cleaning.py
-│   │   ├── datasets.py
-│   │   ├── policy.py
-│   │   ├── profiling.py
-│   │   ├── storage.py
-│   │   └── main.py                 # FastAPI application entrypoint
+├── backend/                             # FastAPI backend
+│   ├── api/                             # API routers and HTTP layer
+│   │   ├── auth.py                      # Authentication endpoints
+│   │   ├── cleaning.py                  # Cleaning runs API
+│   │   ├── datasets.py                  # Dataset upload and access
+│   │   ├── policy.py                    # Cleaning policy endpoints
+│   │   ├── profiling.py                 # Profiling endpoints
+│   │   ├── storage.py                   # API-level storage helpers
+│   │   └── main.py                      # FastAPI application entrypoint
 │   │
-│   ├── app/                        # Core business logic
-│   │   ├── ingestion/              # Dataset ingestion (Excel/CSV parsing)
-│   │   ├── cleaning/               # Cleaning pipeline steps
-│   │   │   ├── main_pipeline.py
-│   │   │   ├── _01_snapshots.py
-│   │   │   ├── _02_normalize.py
-│   │   │   ├── _03_drop_rules.py
-│   │   │   ├── _04_datetime_inference.py
-│   │   │   ├── _05_impute_missing.py
-│   │   │   └── _06_differences.py
-│   │   ├── profiling/              # Dataset profiling logic
-│   │   └── agents/                 # Policy agents (rule-based and LLM-based)
+│   ├── app/                             # Core business logic
+│   │   ├── ingestion/                   # Dataset ingestion (Excel/CSV parsing)
+│   │   │   └── dataset_loader.py
+│   │   │
+│   │   ├── cleaning_steps/                    # 10-stage data cleaning pipeline
+│   │   │   ├── main_pipeline.py               # Orchestrates the full pipeline
+│   │   │   ├── _01_normalize.py
+│   │   │   ├── _02_trim_strings.py
+│   │   │   ├── _03_standardize_missing.py
+│   │   │   ├── _04_cast_types.py
+│   │   │   ├── _05_encode_booleans.py
+│   │   │   ├── _06_drop_rules.py
+│   │   │   ├── _07_datetime_inference.py
+│   │   │   ├── _08_deduplicate.py
+│   │   │   ├── _09_outliers.py
+│   │   │   └── _10_impute_missing.py
+│   │   │
+│   │   ├── cleaning_agent/              # Cleaning policy engine (rule-based + LLM)
+│   │   │   ├── schemas.py                # CleaningPlan schema and validation
+│   │   │   ├── cleaning_policy_agent.py  # Public policy builder API
+│   │   │   ├── cleaning_policy_rule_based.py
+│   │   │   ├── cleaning_policy_llm.py
+│   │   │   ├── cleaning_policy_utils.py  # Safety, clamping, coercion
+│   │   │   └── llm_client.py             # Gemini LLM client wrapper
+│   │   │
+│   │   └── profiling/                   # Dataset profiling logic
+│   │       └── profiling.py
 │   │
-│   ├── database/                   # Database layer
-│   │   ├── db.py                   # SQLAlchemy session
-│   │   ├── models.py               # ORM models
-│   │   ├── security.py             # Auth / JWT utilities
-│   │   └── storage.py              # Storage abstractions
+│   ├── database/                        # Database and storage layer
+│   │   ├── db.py                        # SQLAlchemy session
+│   │   ├── models.py                    # ORM models
+│   │   ├── security.py                  # JWT / auth helpers
+│   │   └── storage.py                   # Local blob storage + JSON serialization
 │   │
-│   ├── test_data/                  # Sample datasets
-│   └── test_scripts/               # Backend tests and experiments
+│   ├── test_data/                       # Sample datasets
+│   └── test_scripts/                    # Backend tests and experiments
 │
-├── frontend/                       # Streamlit frontend
-│   ├── main_streamlit.py           # Streamlit application entrypoint
+├── frontend/                            # Streamlit frontend
+│   ├── main_streamlit.py                # Streamlit application entrypoint
 │   └── ui/
-│       ├── _00_tab_authentication.py
-│       ├── _01_tab_excel_upload.py
-│       ├── _02_tab_cleaning.py
-│       ├── _03_tab_signals.py
-│       ├── _04_tab_visualization.py
-│       ├── _05_save_all_files.py
-│       ├── components.py
-│       └── data_access.py          # Frontend → Backend API client
+│       ├── _00_tab_authentication.py    # Login and registration
+│       ├── _01_tab_excel_upload.py      # File upload and ingestion
+│       ├── _02_tab_cleaning.py           # Cleaning execution UI
+│       ├── _03_tab_signals.py            # Profiling and signal visualization
+│       ├── _04_tab_visualization.py      # Charts and plots
+│       ├── _05_save_all_files.py         # Download cleaned datasets and reports
+│       ├── components.py                # Shared UI components
+│       └── data_access.py               # Frontend → Backend API client
 │
-├── storage/                        # Persistent local storage (outside backend)
+├── storage/                             # Persistent local storage (user-scoped)
 │   └── users/
 │       └── usr_<user_id>/
-│           ├── datasets/            # Per-dataset storage
+│           ├── datasets/                # Uploaded raw datasets
 │           │   └── ds_<dataset_id>/
 │           │       ├── raw.bin
 │           │       ├── raw.parquet
 │           │       └── current.parquet
 │           │
-│           └── runs/                # Cleaning runs history
+│           └── runs/                    # Cleaning runs history
 │               └── run_<run_id>/
 │                   ├── cleaned.parquet
 │                   ├── cleaned.xlsx
 │                   └── report.json
 │
-├── docker-compose.yml              # PostgreSQL only
-├── requirements.txt                # Python dependencies
-├── .env.example                    # Environment variables template
+├── docker-compose.yml                   # PostgreSQL
+├── requirements.txt                     # Python dependencies
 ├── README.md
 └── LICENSE
 ```
 
 ## API Endpoints
 
-### Authentication
+### 1. Authentication
 
 ```bash
 POST   /v1/auth/register     Register new user
@@ -149,29 +166,30 @@ GET    /v1/auth/me           Get current user
 POST   /v1/auth/logout       Logout (client-side token removal)
 ```
 
-### Datasets
+### 2. Datasets
 
 ```bash
-POST   /v1/auth/register     Register new user
-POST   /v1/auth/login        Login
-GET    /v1/auth/me           Get current user
-POST   /v1/auth/logout       Logout (client-side token removal)
+GET    /v1/datasets                         List all datasets for the current user
+POST   /v1/datasets                         Upload a new dataset (Excel or CSV)=
+GET    /v1/datasets/{dataset_id}            Get dataset metadata
+GET    /v1/datasets/{dataset_id}/preview    Preview dataset rows
+GET    /v1/datasets/{dataset_id}/download   Download dataset (raw or cleaned)
 ```
 
-### Profiling
+### 3. Profiling
 
 ```bash
 POST   /v1/profiling                  Run profiling
 GET    /v1/profiling/{profile_id}     Get profiling report
 ```
 
-### Policy
+### 4. Policy
 
 ```bash
 POST   /v1/policy/suggest             Suggest cleaning policy
 ```
 
-### Cleaning
+### 5. Cleaning
 
 ```bash
 GET    /v1/cleaning/runs                          List user cleaning runs
