@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from backend.app.ingestion.dataset_loader import load_from_path
-from backend.app.cleaning.main_pipeline import run_cleaning_pipeline
+from backend.app.cleaning_steps.main_pipeline import run_cleaning_pipeline
 
 
 def _pretty(obj) -> str:
@@ -15,19 +15,15 @@ def _pretty(obj) -> str:
 
 
 def main() -> None:
-    # абсолютный корень проекта: .../Multi-Agent-Excel-Analytics
     project_root = Path(__file__).resolve().parents[2]
 
-    # выбери любой тестовый файл
     test_file = project_root / "backend" / "test_data" / "framingham.csv"
-    # если хочешь Excel:
-    # test_file = project_root / "backend" / "test_data" / "data_jobs_salary_monthly.xlsx"
 
     if not test_file.exists():
         raise FileNotFoundError(f"Test file not found: {test_file}")
 
     sheets = load_from_path(test_file)
-    sheet = sheets[0]  # первый датасет (sheet или CSV)
+    sheet = sheets[0]
     df = sheet.df
 
     print("=" * 80)
@@ -37,9 +33,6 @@ def main() -> None:
     print(f"RAW SHAPE: {df.shape}")
     print("=" * 80)
 
-    # -------------------------
-    # RULE-BASED
-    # -------------------------
     clean_df_rb, report_rb = run_cleaning_pipeline(df, use_llm=False)
 
     print("\n[RUN] Rule-based plan (use_llm=False)")
@@ -53,9 +46,6 @@ def main() -> None:
     print(f"- inferred_datetime_columns: {report_rb.get('inferred_datetime_columns')}")
     print(f"- imputation: {report_rb.get('imputation', {})}")
 
-    # -------------------------
-    # LLM (Gemini) — will fallback if env key not set
-    # -------------------------
     clean_df_llm, report_llm = run_cleaning_pipeline(
         df,
         use_llm=True,
@@ -72,9 +62,6 @@ def main() -> None:
     print(f"- inferred_datetime_columns: {report_llm.get('inferred_datetime_columns')}")
     print(f"- imputation: {report_llm.get('imputation', {})}")
 
-    # -------------------------
-    # Save reports
-    # -------------------------
     out_dir = project_root / "backend" / "test_scripts" / "_outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
 

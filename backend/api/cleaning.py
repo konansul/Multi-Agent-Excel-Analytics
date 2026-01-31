@@ -1,4 +1,4 @@
-# backend/api/cleaning.py
+# backend/api/cleaning_steps.py
 from __future__ import annotations
 
 import io
@@ -16,7 +16,7 @@ from backend.api.auth import get_current_user
 from backend.api.models import CleaningRunRequest, CleaningRunResponse
 from backend.api.storage import new_id
 
-from backend.app.cleaning.main_pipeline import run_cleaning_pipeline
+from backend.app.cleaning_steps.main_pipeline import run_cleaning_pipeline
 
 from backend.database.storage import get_bytes, put_bytes, delete_key, to_jsonable
 from backend.database.db import get_db
