@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-from frontend.ui.data_access import list_my_runs, download_artifact, delete_run
+from ui.data_access import list_my_runs, download_artifact, delete_run
 
 
 def _safe(s: str) -> str:

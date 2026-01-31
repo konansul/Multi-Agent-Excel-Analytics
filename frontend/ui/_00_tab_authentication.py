@@ -4,7 +4,7 @@ from __future__ import annotations
 import streamlit as st
 from typing import Optional
 
-from frontend.ui.data_access import register_user, login_user, auth_me, logout_user
+from ui.data_access import register_user, login_user, auth_me, logout_user
 
 def _set_token(token: Optional[str]) -> None:
     if token:
