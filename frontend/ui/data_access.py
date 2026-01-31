@@ -19,9 +19,7 @@ def _raise(resp: requests.Response):
         raise RuntimeError(f"API error {resp.status_code}: {detail}")
 
 def _auth_headers(token: Optional[str] = None) -> Dict[str, str]:
-    """
-    Если token не передан — берём из session_state.
-    """
+
     tok = token or st.session_state.get("auth_token")
     if not tok or not isinstance(tok, str):
         return {}
@@ -31,14 +29,14 @@ def register_user(email: str, password: str) -> Dict[str, Any]:
     payload = {"email": email, "password": password}
     resp = requests.post(f"{API_BASE}/auth/register", json=payload, timeout=TIMEOUT)
     _raise(resp)
-    return resp.json()  # {user_id, email}
+    return resp.json()
 
 
 def login_user(email: str, password: str) -> Dict[str, Any]:
     payload = {"email": email, "password": password}
     resp = requests.post(f"{API_BASE}/auth/login", json=payload, timeout=TIMEOUT)
     _raise(resp)
-    data = resp.json()  # {access_token, token_type}
+    data = resp.json()
 
     token = data.get("access_token")
     if not token:
@@ -55,24 +53,15 @@ def auth_me() -> Dict[str, Any]:
 
 
 def logout_user() -> None:
-    # JWT logout в MVP делается на клиенте: стереть токен.
     st.session_state.pop("auth_token", None)
-    # очистим кеши, чтобы не вытягивать данные другого пользователя
     try:
         st.cache_data.clear()
     except Exception:
         pass
 
-
-# -------------------------
-# Datasets
-# -------------------------
 @st.cache_data(show_spinner=False)
 def cached_upload(file_bytes: bytes, filename: str, token_cache_key: str) -> List[Dict[str, Any]]:
-    """
-    token_cache_key нужен только для того, чтобы кеш Streamlit был разный для разных юзеров.
-    Внутри функции он не используется напрямую (но влияет на ключ кеша).
-    """
+
     files = {"file": (filename, file_bytes)}
 
     resp = requests.post(
@@ -144,7 +133,7 @@ def suggest_policy(dataset_id: str, mode: str = "rule_based", llm_model: str = "
         timeout=TIMEOUT,
     )
     _raise(resp)
-    return resp.json()  # {policy, source, notes}
+    return resp.json()
 
 def run_cleaning(
     dataset_id: str,
@@ -197,7 +186,7 @@ def download_artifact(run_id: str, name: str) -> bytes:
 def list_my_runs(token: str) -> Dict[str, Any]:
     resp = requests.get(f"{API_BASE}/cleaning/runs", headers=_auth_headers(token), timeout=TIMEOUT)
     _raise(resp)
-    return resp.json()  # {"runs": [...]}
+    return resp.json()
 
 def delete_run(run_id: str) -> Dict[str, Any]:
     resp = requests.delete(
