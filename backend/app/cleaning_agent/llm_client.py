@@ -1,16 +1,20 @@
+# backend/app/cleaning_agent/llm_client.py
 from __future__ import annotations
 
 import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
-from google import genai  # pip install google-genai
+from google import genai
 
 
 class LLMUnavailableError(RuntimeError):
     pass
+
+
+JSONType = Union[Dict[str, Any], list]
 
 
 @dataclass
@@ -18,7 +22,7 @@ class LLMClient:
     """
     Gemini client wrapper (Google GenAI SDK).
     - complete(prompt) -> str
-    - extract_json(text) -> dict
+    - extract_json(text) -> dict (or list, but we validate higher-level anyway)
     """
     model: str = "gemini-2.5-flash"
     api_key: Optional[str] = None
@@ -26,8 +30,6 @@ class LLMClient:
 
     @staticmethod
     def from_env(model: str = "gemini-2.5-flash") -> "LLMClient":
-        # If both are set, GOOGLE_API_KEY can take precedence (per SDK docs),
-        # but we accept either.
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise LLMUnavailableError("Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.")
@@ -38,13 +40,9 @@ class LLMClient:
             return
         if not self.api_key:
             raise LLMUnavailableError("Missing api_key.")
-        # Official SDK client
         self._client = genai.Client(api_key=self.api_key)
 
     def complete(self, prompt: str) -> str:
-        """
-        Returns model output as plain text.
-        """
         self._ensure_client()
 
         resp = self._client.models.generate_content(
@@ -52,38 +50,53 @@ class LLMClient:
             contents=prompt,
         )
 
-        # SDK returns a response object; .text is the simplest way to get the final text.
         text = getattr(resp, "text", None)
         if not text:
-            # Fallback: stringify full response if needed
             text = str(resp)
         return text
 
-    def extract_json(self, text: str) -> Dict[str, Any]:
+    def extract_json(self, text: str) -> JSONType:
         """
-        Extract JSON dict from model output.
+        Extract JSON from model output.
         Supports:
-        - pure JSON
+        - pure JSON (dict OR list)
         - JSON wrapped in ```json ... ```
         - extra text around JSON
         """
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Empty LLM response, cannot extract JSON.")
 
-        # 1) Try direct parse
+        raw = text.strip()
+
         try:
-            return json.loads(text)
-        except Exception:
+            return json.loads(raw)
+        except json.JSONDecodeError:
             pass
 
-        # 2) Try fenced block ```json ... ```
-        fence = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        fence = re.search(
+            r"```json\s*([\s\S]*?)\s*```",
+            raw,
+            flags=re.IGNORECASE,
+        )
         if fence:
-            return json.loads(fence.group(1))
+            candidate = fence.group(1).strip()
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
 
-        # 3) Try first {...} block
-        brace = re.search(r"(\{.*\})", text, flags=re.DOTALL)
-        if brace:
-            return json.loads(brace.group(1))
+        brace_obj = re.search(r"(\{[\s\S]*?\})", raw)
+        if brace_obj:
+            try:
+                return json.loads(brace_obj.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        brace_arr = re.search(r"(\[[\s\S]*?\])", raw)
+        if brace_arr:
+            try:
+                return json.loads(brace_arr.group(1))
+            except json.JSONDecodeError:
+                pass
 
         raise ValueError("Could not extract JSON from LLM output.")
