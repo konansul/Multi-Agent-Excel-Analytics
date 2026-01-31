@@ -1,4 +1,4 @@
-# backend/app/cleaning/main_pipeline.py
+# backend/app/cleaning_steps/main_pipeline.py
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple, Union
