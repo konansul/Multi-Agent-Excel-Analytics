@@ -68,7 +68,8 @@ streamlit run frontend/main_streamlit.py
 ## Database Schema
 The backend uses a PostgreSQL database to persist users, datasets, profiling results, and cleaning executions in a fully reproducible way. Each registered user has isolated ownership over their uploaded datasets, generated profiles, and cleaning runs. Uploaded Excel and CSV files are represented as datasets, where each Excel sheet is stored and processed independently. Profiling results are stored separately and capture structural and statistical signals used to guide cleaning decisions. Every execution of the cleaning pipeline is recorded as a cleaning run, including its status, generated artifacts, and reports. Multiple cleaning runs can exist for the same dataset, allowing history tracking and safe re-execution with different policies. The schema is designed to preserve the full lineage from raw data to cleaned outputs, even across user logins. Database records reference large artifacts stored on disk, combining transactional metadata with efficient file storage. The overall schema is depicted in the figure below:
 
-<img width="2940" height="1912" alt="image" src="https://github.com/user-attachments/assets/d6cdcee7-6583-4ba1-a092-e54c64b3918f" />
+![F5938AB8-064D-411D-9EDF-B6F9A4F1F09F_1_201_a](https://github.com/user-attachments/assets/6ededfca-e5a1-4666-9371-4c131b88f7f4)
+
 
 ## Project structure
 
