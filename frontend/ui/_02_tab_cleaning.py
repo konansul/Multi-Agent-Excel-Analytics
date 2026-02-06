@@ -22,7 +22,7 @@ def _is_excel_file(file_name: str) -> bool:
 
 
 def _safe_sheet_name(name: str, fallback: str = "Sheet") -> str:
-    bad = set('[]:*?/\\')
+    bad = set("[]:*?/\\")
     cleaned = "".join("_" if c in bad else c for c in (name or "").strip())
     cleaned = cleaned[:31] if cleaned else fallback
     return cleaned
@@ -43,7 +43,7 @@ def _render_execution_summary(report: Dict[str, Any]) -> None:
 
 def _render_policy_block(pol: Dict[str, Any], *, dataset_id: str) -> None:
     plan = pol.get("policy", {}) or {}
-    st.subheader(f"Cleaning Plan")
+    st.subheader("Cleaning Plan")
     st.metric("Source", str(pol.get("source", plan.get("source", "unknown"))))
 
     enabled_steps = plan.get("enabled_steps", {}) or {}
@@ -51,10 +51,7 @@ def _render_policy_block(pol: Dict[str, Any], *, dataset_id: str) -> None:
     notes = pol.get("notes") or plan.get("notes") or []
 
     if enabled_steps:
-        steps_df = (
-            pd.DataFrame([{"step": k, "enabled": bool(v)} for k, v in enabled_steps.items()])
-            .sort_values("step")
-        )
+        steps_df = pd.DataFrame([{"step": k, "enabled": bool(v)} for k, v in enabled_steps.items()]).sort_values("step")
         st.dataframe(steps_df, width="stretch", hide_index=True)
 
     if params:
@@ -88,10 +85,138 @@ def _render_after_preview_and_downloads(
         return
 
 
-def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
+def _render_multi_file_cleaning_block(files_registry: Dict[str, Any]) -> None:
 
+    uploaded_files_count = len(files_registry)
+
+    st.subheader(f"Clean all uploaded files: {uploaded_files_count}")
+
+    st.info(f"Run cleaning for all uploaded files.")
+
+    cA, cB, cC = st.columns([1, 1, 2])
+    with cA:
+        use_llm_all_files = st.checkbox("Use LLM", value=False, key="use_llm_all_files")
+    with cB:
+        llm_model_all_files = st.selectbox(
+            "LLM model",
+            ["gemini-2.5-flash"],
+            index=0,
+            disabled=not use_llm_all_files,
+            key="llm_model_all_files",
+        )
+    with cC:
+        st.caption("")
+
+    if st.button(
+        "Clean all uploaded files",
+        type="primary",
+        width="stretch",
+        key="btn_clean_all_uploaded_files",
+    ):
+        tasks: List[Dict[str, Any]] = []
+        for fname, meta in files_registry.items():
+            datasets_meta_i = meta.get("datasets") or []
+            if not isinstance(datasets_meta_i, list) or not datasets_meta_i:
+                tasks.append({"file_name": fname, "error": "No datasets meta (ingestion not completed)."})
+                continue
+
+            for j, ds_meta in enumerate(datasets_meta_i, start=1):
+                ds_id = ds_meta.get("dataset_id")
+                sh_name = ds_meta.get("sheet_name") or f"Sheet{j}"
+                if not ds_id:
+                    tasks.append({"file_name": fname, "sheet_name": sh_name, "error": "Missing dataset_id"})
+                    continue
+                tasks.append({"file_name": fname, "sheet_name": sh_name, "dataset_id": ds_id})
+
+        real_tasks = [t for t in tasks if t.get("dataset_id")]
+        total = len(real_tasks)
+
+        if total == 0:
+            st.error("No datasets found to clean. Make sure files were ingested in tab 1.")
+            return
+
+        progress = st.progress(0.0)
+        status = st.empty()
+
+        results: List[Dict[str, Any]] = []
+
+        for i, t in enumerate(real_tasks, start=1):
+            fname = t["file_name"]
+            sh_name = t.get("sheet_name") or "Sheet"
+            ds_id = t["dataset_id"]
+
+            status.info(f"Cleaning {i}/{total}: {fname} — {sh_name}")
+
+            try:
+                mode = "llm" if use_llm_all_files else "rule_based"
+                pol_i = suggest_policy(ds_id, mode=mode, llm_model=llm_model_all_files)
+                st.session_state[f"policy_{ds_id}"] = pol_i
+            except Exception as e:
+                results.append({"file_name": fname, "sheet_name": sh_name, "dataset_id": ds_id, "policy_error": str(e)})
+
+            try:
+                run_id_i = run_cleaning(ds_id, use_llm=use_llm_all_files, llm_model=llm_model_all_files)
+                report_i = get_run_report(run_id_i)
+
+                if "runs_store" not in st.session_state or not isinstance(st.session_state.runs_store, dict):
+                    st.session_state.runs_store = {}
+
+                st.session_state.runs_store[ds_id] = {
+                    "file_name": fname,
+                    "sheet_name": sh_name,
+                    "run_id": run_id_i,
+                    "report": report_i,
+                }
+
+                st.session_state[f"run_{ds_id}"] = run_id_i
+                st.session_state[f"report_{ds_id}"] = report_i
+
+                results.append({"file_name": fname, "sheet_name": sh_name, "dataset_id": ds_id, "run_id": run_id_i})
+            except Exception as e:
+                results.append({"file_name": fname, "sheet_name": sh_name, "dataset_id": ds_id, "error": str(e)})
+
+            progress.progress(i / total)
+
+        st.success("Cleaning finished for all uploaded files ✅")
+        st.session_state["clean_all_uploaded_files_results"] = results
+        st.divider()
+
+    batch = st.session_state.get("clean_all_uploaded_files_results")
+    if isinstance(batch, list) and batch:
+        st.subheader("Cleaning results")
+        st.dataframe(pd.DataFrame(batch), width="stretch", hide_index=True)
+
+
+def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
     sheet_name = sheet_meta.get("sheet_name") or "Sheet"
-    st.subheader(f" Cleaning — {sheet_name}")
+    st.subheader(f"Active file – {file_name}: {sheet_name}")
+
+    files_registry = st.session_state.get("files_registry") or {}
+    multi_file_mode = isinstance(files_registry, dict) and len(files_registry) >= 2
+
+    if multi_file_mode:
+
+        _render_multi_file_cleaning_block(files_registry)
+
+        active_run_id = st.session_state.get(f"run_{dataset_id}")
+        active_report = st.session_state.get(f"report_{dataset_id}")
+        active_pol = st.session_state.get(f"policy_{dataset_id}")
+
+        if active_pol:
+            _render_policy_block(active_pol, dataset_id=dataset_id)
+
+        if active_report:
+            _render_execution_summary(active_report)
+            _render_after_preview_and_downloads(
+                dataset_id=dataset_id,
+                run_id=active_run_id,
+                file_name=file_name,
+                sheet_name=sheet_name,
+            )
+            return active_run_id, active_report
+
+        st.info("Clean all files first, then select a file and sheet in Upload Files to view results here.")
+        return None, None
 
     datasets_meta = (
         st.session_state.get("active_datasets_meta")
@@ -121,20 +246,13 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                 key="llm_model_all",
             )
         with c3:
-            st.caption("One button: (optional) policy → cleaning for every sheet → build one Excel with all cleaned sheets.")
+            st.caption("")
 
-        if st.button(
-            "Clean all Excel sheets",
-            type="primary",
-            width="stretch",
-            key="btn_clean_all",
-        ):
+        if st.button("Clean all Excel sheets", type="primary", width="stretch", key="btn_clean_all"):
             progress = st.progress(0.0)
             status = st.empty()
 
-            cleaned_frames: List[Tuple[str, pd.DataFrame]] = []  # (sheet_name, df)
-            run_results: List[Dict[str, Any]] = []
-
+            cleaned_frames: List[Tuple[str, pd.DataFrame]] = []
             total = len(datasets_meta)
 
             try:
@@ -144,7 +262,6 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                     safe_name = _safe_sheet_name(sh_name, fallback=f"Sheet{i}")
 
                     if not ds_id:
-                        run_results.append({"sheet_name": sh_name, "error": "No dataset_id"})
                         progress.progress(i / total)
                         continue
 
@@ -154,11 +271,21 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                         mode = "llm" if use_llm_all else "rule_based"
                         pol_i = suggest_policy(ds_id, mode=mode, llm_model=llm_model_all)
                         st.session_state[f"policy_{ds_id}"] = pol_i
-                    except Exception as e:
-                        run_results.append({"dataset_id": ds_id, "sheet_name": sh_name, "policy_error": str(e)})
+                    except Exception:
+                        pass
 
                     run_id_i = run_cleaning(ds_id, use_llm=use_llm_all, llm_model=llm_model_all)
                     report_i = get_run_report(run_id_i)
+
+                    if "runs_store" not in st.session_state or not isinstance(st.session_state.runs_store, dict):
+                        st.session_state.runs_store = {}
+
+                    st.session_state.runs_store[ds_id] = {
+                        "file_name": file_name,
+                        "sheet_name": sh_name,
+                        "run_id": run_id_i,
+                        "report": report_i,
+                    }
 
                     st.session_state[f"run_{ds_id}"] = run_id_i
                     st.session_state[f"report_{ds_id}"] = report_i
@@ -167,7 +294,6 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                     df_clean = pd.read_excel(io.BytesIO(xlsx_bytes), sheet_name=0)
                     cleaned_frames.append((safe_name, df_clean))
 
-                    run_results.append({"dataset_id": ds_id, "sheet_name": sh_name, "run_id": run_id_i})
                     progress.progress(i / total)
 
                 out = io.BytesIO()
@@ -185,8 +311,7 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                         df.to_excel(writer, index=False, sheet_name=final_name)
 
                 out.seek(0)
-                st.success("✅ All sheets cleaned and combined Excel is ready")
-
+                st.success("All sheets cleaned ✅")
                 st.divider()
 
             except Exception as e:
@@ -209,7 +334,7 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
             )
             return active_run_id, active_report
 
-        st.info("Run 'Clean ALL sheets' to generate cleaned data + reports for all sheets.")
+        st.info("Run 'Clean all Excel sheets' to generate cleaned data + reports for all sheets.")
         return None, None
 
     c1, c2, c3 = st.columns([1, 1, 2])
@@ -226,7 +351,6 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
     with c3:
         st.caption("")
 
-
     if st.button("Run cleaning", type="primary", width="stretch", key=f"btn_run_clean_{dataset_id}"):
         try:
             with st.spinner("Running on backend…"):
@@ -237,11 +361,20 @@ def render_tab_cleaning(file_name: str, sheet_meta: dict, dataset_id: str):
                 run_id = run_cleaning(dataset_id, use_llm=use_llm, llm_model=llm_model)
                 report = get_run_report(run_id)
 
+                if "runs_store" not in st.session_state or not isinstance(st.session_state.runs_store, dict):
+                    st.session_state.runs_store = {}
+
+                st.session_state.runs_store[dataset_id] = {
+                    "file_name": file_name,
+                    "sheet_name": sheet_name,
+                    "run_id": run_id,
+                    "report": report,
+                }
+
                 st.session_state[f"run_{dataset_id}"] = run_id
                 st.session_state[f"report_{dataset_id}"] = report
 
-            st.success(f"Cleaning finished ✅")
-
+            st.success("Cleaning finished ✅")
         except Exception as e:
             st.error(f"Cleaning failed: {e}")
 
