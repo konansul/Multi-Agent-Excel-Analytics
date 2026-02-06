@@ -1,13 +1,14 @@
-# frontend/ui/_01_tab_excel_upload.py
 from __future__ import annotations
 
 import io
 import re
+from typing import Any, Dict, List
+
 import pandas as pd
 import streamlit as st
 
 from ui.components import sheets_summary_table
-from ui.data_access import cached_upload, get_preview, run_cleaning, get_run_report, download_dataset, suggest_policy
+from ui.data_access import cached_upload, get_preview
 
 
 def _is_excel_file(file_name: str) -> bool:
@@ -51,26 +52,51 @@ def render_tab_ingestion() -> None:
                 "datasets": None,
             }
 
+    for fname, meta in list(st.session_state.files_registry.items()):
+        if meta.get("datasets") is not None:
+            continue
+
+        try:
+            datasets_meta_i = cached_upload(meta["bytes"], fname, token_cache_key=token)
+            st.session_state.files_registry[fname]["datasets"] = datasets_meta_i
+        except Exception as e:
+            st.error(f"Failed to upload/ingest {fname} via API: {e}")
+            return
+
     file_names = list(st.session_state.files_registry.keys())
-    selected_file = st.selectbox("Select file to work with", file_names, key="selected_file_tab1")
-    file_bytes = st.session_state.files_registry[selected_file]["bytes"]
-
-    try:
-        datasets_meta = cached_upload(file_bytes, selected_file, token_cache_key=token)
-        st.session_state.files_registry[selected_file]["datasets"] = datasets_meta
-    except Exception as e:
-        st.error(f"Failed to upload/ingest file via API: {e}")
+    if not file_names:
+        st.error("files_registry is empty after upload. Please try again.")
         return
 
-    if not datasets_meta:
-        st.error("No sheets/datasets returned from API.")
+    selected_file = st.selectbox(
+        "Select file to work with",
+        file_names,
+        key="selected_file_tab1",
+    )
+
+    datasets_meta = st.session_state.files_registry[selected_file].get("datasets") or []
+    if not isinstance(datasets_meta, list) or not datasets_meta:
+        st.error("No sheets/datasets returned from API for selected file.")
         return
 
-    sheet_names = [d.get("sheet_name") for d in datasets_meta]
+    sheet_names = [d.get("sheet_name") for d in datasets_meta if isinstance(d, dict)]
+    sheet_names = [s for s in sheet_names if s]
+    if not sheet_names:
+        st.error("No sheet names found in API response.")
+        return
+
     selected_sheet_name = st.selectbox("Select sheet", sheet_names, key="selected_sheet_tab1")
 
-    sheet_meta = next(d for d in datasets_meta if d.get("sheet_name") == selected_sheet_name)
-    dataset_id = sheet_meta["dataset_id"]
+    try:
+        sheet_meta = next(d for d in datasets_meta if d.get("sheet_name") == selected_sheet_name)
+    except StopIteration:
+        st.error("Selected sheet not found in datasets meta.")
+        return
+
+    dataset_id = sheet_meta.get("dataset_id")
+    if not dataset_id:
+        st.error("Missing dataset_id for selected sheet.")
+        return
 
     st.session_state["active_file_name"] = selected_file
     st.session_state["active_datasets_meta"] = datasets_meta
@@ -80,17 +106,25 @@ def render_tab_ingestion() -> None:
     st.session_state["datasets_meta"] = datasets_meta
 
     st.divider()
+
     st.subheader("Sheets summary")
     st.dataframe(sheets_summary_table(datasets_meta), width="stretch", hide_index=True)
 
-    st.subheader(f"Raw preview — {sheet_meta['sheet_name']}")
-    preview = get_preview(dataset_id, rows=30)
-    st.dataframe(pd.DataFrame(preview["rows"]), width="stretch")
+    st.subheader(f"Raw preview — {sheet_meta.get('sheet_name')}")
+    try:
+        preview = get_preview(dataset_id, rows=30)
+        st.dataframe(pd.DataFrame(preview.get("rows") or []), width="stretch", hide_index=True)
+    except Exception as e:
+        st.error(f"Failed to fetch preview: {e}")
+        return
 
     st.subheader("Raw dtypes")
     dtypes = sheet_meta.get("dtypes", {}) or {}
-    st.dataframe(
-        pd.DataFrame([{"column": k, "dtype": v} for k, v in dtypes.items()]),
-        width="stretch",
-        hide_index=True,
-    )
+    if isinstance(dtypes, dict) and dtypes:
+        st.dataframe(
+            pd.DataFrame([{"column": k, "dtype": v} for k, v in dtypes.items()]),
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.info("No dtype info returned for this sheet.")
